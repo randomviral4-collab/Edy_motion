@@ -1,4 +1,4 @@
-<title>Mr.Pono Motion</title>
+<title>MrPono Motion</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -540,7 +540,7 @@ async function llmText(kind,prompt,o){
     var cj=null,cerr=null,ks=cuKeyList();
     for(var cn=0;cn<ks.length&&!cj;cn++){
       var ci=(cuIdx+cn)%ks.length;
-      try{cj=await net(cb+"/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+ks[ci]},body:JSON.stringify({model:cm,messages:[{role:"user",content:prompt}],temperature:o.temp==null?0.5:o.temp,max_tokens:o.max||3000})});cuIdx=ci}
+      try{cj=await cuNet(cb+"/chat/completions",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+ks[ci]},body:JSON.stringify({model:cm,messages:[{role:"user",content:prompt}],temperature:o.temp==null?0.5:o.temp,max_tokens:o.max||3000})});cuIdx=ci}
       catch(ce){cerr=ce;if(!(ce.status===429||ce.status===402||ce.status===401||ce.status===403||/quota|insufficient|balance|exceed|limit/i.test(ce.message||"")))throw ce;if(cn<ks.length-1)setMsg("Key AI kustom ke-"+(ci+1)+" habis atau ditolak, pindah ke key berikutnya…","bad")}
     }
     if(!cj)throw cerr||new Error("Isi API key AI kustom dulu.");
@@ -691,20 +691,29 @@ async function retrying(fn,label){
     }
   }
 }
+function cuNet(url,opts){
+  var viaProxy=S.gem.cuProxy!==false&&/^https?:$/.test(location.protocol);
+  if(!viaProxy)return net(url,opts);
+  var h=opts.headers||{};
+  return net("/api/ai",{method:"POST",headers:{"Content-Type":"application/json","Authorization":h.Authorization||"","x-target-url":url},body:opts.body}).catch(function(e){
+    if(e.status===404&&!e.body)e.message="Proxy /api/ai belum ada di proyek Vercel Anda. Tambahkan file api/ai.js lalu deploy ulang, atau matikan centang proxy. ("+e.message+")";
+    throw e;
+  });
+}
 async function urlToData(u){var r=await fetch(u),b=await r.blob();return await new Promise(function(res,rej){var f=new FileReader();f.onload=function(){res(f.result)};f.onerror=rej;f.readAsDataURL(b)})}
 async function customImage(prompt,ref){
   var base=(S.gem.cuBase||"").replace(/\/+$/,""),m=S.gem.cuImg;
   if(!base||!m)throw new Error("Isi alamat API dan nama model gambar di bagian AI kustom (tab Naskah).");
   var h={"Content-Type":"application/json","Authorization":"Bearer "+cuCur()};
   if(S.gem.cuImgMode==="images"){
-    var j=await net(base+"/images/generations",{method:"POST",headers:h,body:JSON.stringify({model:m,prompt:prompt,n:1,size:S.gem.cuSize||"1024x1536"})});
+    var j=await cuNet(base+"/images/generations",{method:"POST",headers:h,body:JSON.stringify({model:m,prompt:prompt,n:1,size:S.gem.cuSize||"1024x1536"})});
     var d=j&&j.data&&j.data[0];
     if(d&&d.b64_json)return "data:image/png;base64,"+d.b64_json;
     if(d&&d.url)return await urlToData(d.url);
     throw new Error("Respons tidak berisi gambar");
   }
   var content=ref?[{type:"text",text:prompt},{type:"image_url",image_url:{url:"data:"+ref.mime+";base64,"+ref.data}}]:prompt;
-  var j2=await net(base+"/chat/completions",{method:"POST",headers:h,body:JSON.stringify({model:m,messages:[{role:"user",content:content}],modalities:["image","text"],image_config:{aspect_ratio:"9:16"}})});
+  var j2=await cuNet(base+"/chat/completions",{method:"POST",headers:h,body:JSON.stringify({model:m,messages:[{role:"user",content:content}],modalities:["image","text"],image_config:{aspect_ratio:"9:16"}})});
   var msg=j2&&j2.choices&&j2.choices[0]&&j2.choices[0].message,u="";
   var im=msg&&msg.images&&msg.images[0];
   if(im)u=(im.image_url&&im.image_url.url)||im.url||"";
@@ -1112,6 +1121,7 @@ function customHTML(g,pt,pc){
   var h='<label class="f">AI untuk membuat gambar<select id="gprovimg"><option value="gemini"'+(pi==="gemini"?" selected":"")+'>Gemini (model gambar di bawah)</option><option value="custom"'+(pi==="custom"?" selected":"")+'>AI kustom (banyak model)</option></select></label>';
   if(pt!=="custom"&&pc!=="custom"&&pi!=="custom")return h;
   return h+'<label class="f">Alamat API (format OpenAI)<input type="text" id="cubase" value="'+esc(g.cuBase||"https://openrouter.ai/api/v1")+'"'+att+'></label>'+
+   '<label class="chk"><input type="checkbox" id="cuproxy"'+(g.cuProxy!==false?" checked":"")+'> Lewat proxy Vercel (/api/ai) supaya tidak diblokir browser</label>'+
    '<label class="f">API key AI kustom (boleh lebih dari satu, pisahkan dengan koma; pindah otomatis kalau habis)<input type="password" id="cukey" autocomplete="off" value="'+esc(cuKey)+'" placeholder="key1, key2"'+att+'></label>'+
    '<label class="f">Model teks dan kode<select id="cutextsel">'+CU_MODELS.map(function(m){return '<option value="'+m+'"'+(!g.cuTextCustom&&g.cuText===m?" selected":"")+'>'+m+'</option>'}).join("")+'<option value="custom"'+((g.cuTextCustom||CU_MODELS.indexOf(g.cuText)<0)?" selected":"")+'>Lainnya (ketik sendiri)</option></select></label>'+
    ((g.cuTextCustom||CU_MODELS.indexOf(g.cuText)<0)?'<label class="f">Nama model teks<input type="text" id="cutext" value="'+esc(g.cuText||"")+'" placeholder="nama model"'+att+'></label>':'')+
@@ -1247,6 +1257,7 @@ panel.addEventListener("change",function(e){
   if(el.id==="gauto"){S.gem.autoCode=el.checked;save()}
   if(el.id==="gimgsel"){if(el.value==="custom"){S.gem.imgCustom=true}else{S.gem.imgCustom=false;S.gem.img=el.value}save();renderPanel()}
   if(el.id==="cutextsel"){if(el.value==="custom"){S.gem.cuTextCustom=true}else{S.gem.cuTextCustom=false;S.gem.cuText=el.value}save();renderPanel()}
+  if(el.id==="cuproxy"){S.gem.cuProxy=el.checked;save()}
   if(el.id==="gprovimg"){S.gem.provImg=el.value;save();renderPanel()}
   if(el.id==="cuimode"){S.gem.cuImgMode=el.value;save();renderPanel()}
   if(el.id==="gprovtext"){S.gem.provText=el.value;save();renderPanel()}
